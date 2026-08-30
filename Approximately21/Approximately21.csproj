@@ -49,5 +49,9 @@
             <HintPath>$(ApproximatelyUpDirectory)\BepInEx\interop\UnityEngine.CoreModule.dll</HintPath>
             <Private>false</Private>
         </Reference>
+        <Reference Include="UnityEngine.AssetBundleModule">
+            <HintPath>$(ApproximatelyUpDirectory)\BepInEx\interop\UnityEngine.AssetBundleModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
     </ItemGroup>
 </Project>
