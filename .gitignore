@@ -1,0 +1,15 @@
+﻿# .NET build artifacts
+[Bb]in/
+[Oo]bj/
+TestResults/
+
+# .NET user-specific files
+*.user
+*.rsuser
+*.suo
+*.userosscache
+*.sln.docstates
+
+# JetBrains Rider / IntelliJ IDEA user settings
+.idea/
+*.sln.iml
