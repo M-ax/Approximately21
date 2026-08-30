@@ -1,5 +1,4 @@
 using System;
-using System.IO;
 using BepInEx.Logging;
 using HarmonyLib;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
@@ -492,22 +491,19 @@ public class InjectableBlock : MonoBehaviour
                 : null;
         }
 
-        var pluginDirectory = Path.GetDirectoryName(typeof(InjectableBlock).Assembly.Location);
-        var meshPath = string.IsNullOrWhiteSpace(pluginDirectory) || string.IsNullOrWhiteSpace(RawMeshFileName)
-            ? null
-            : Path.Combine(pluginDirectory, RawMeshFileName);
-        if (!string.IsNullOrWhiteSpace(meshPath) && File.Exists(meshPath))
+        using var meshStream = typeof(InjectableBlock).Assembly.GetManifestResourceStream(RawMeshFileName);
+        if (meshStream != null)
         {
             try
             {
-                var rawMeshes = RawMeshModelLoader.TryLoadMeshes(meshPath, PrefabName + "_Mesh", RawMeshScale);
+                var rawMeshes = RawMeshModelLoader.TryLoadMeshes(meshStream, PrefabName + "_Mesh", RawMeshScale);
                 BlockModelCache.Store(PrefabName, rawMeshes);
-                _log.LogInfo($"Loaded {PrefabName}'s raw model from {RawMeshFileName}.");
+                _log.LogInfo($"Loaded {PrefabName}'s raw model from embedded resource {RawMeshFileName}.");
                 return rawMeshes[0];
             }
             catch (Exception exception)
             {
-                _log.LogWarning($"Could not load {PrefabName}'s raw model; trying the AssetBundle fallback. {exception}");
+                _log.LogWarning($"Could not load {PrefabName}'s embedded raw model; using the placeholder model. {exception}");
             }
         }
 

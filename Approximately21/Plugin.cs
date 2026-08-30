@@ -13,7 +13,7 @@ public class Plugin : BasePlugin
     {
         Log = base.Log;
         Log.LogInfo($"Plugin {MyPluginInfo.PLUGIN_GUID} is loaded!");
-        CheckerboardBlockCatalogRegistrar.RegisterDefinition();
-        AddComponent<CheckerboardBlockCatalogRegistrar>();
+        BlackjackTable.RegisterDefinition();
+        AddComponent<BlackjackTable>();
     }
 }

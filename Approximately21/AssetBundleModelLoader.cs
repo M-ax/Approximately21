@@ -114,9 +114,8 @@ internal static class RawMeshModelLoader
     private const int MaximumVertexCount = 1_000_000;
     private const int MaterialGroupCount = 4;
 
-    public static Mesh[] TryLoadMeshes(string meshPath, string meshName, float scale)
+    public static Mesh[] TryLoadMeshes(Stream stream, string meshName, float scale)
     {
-        using var stream = File.OpenRead(meshPath);
         using var reader = new BinaryReader(stream);
 
         var signature = reader.ReadBytes(4);

@@ -3,7 +3,7 @@ using UnityEngine;
 
 namespace Approximately21;
 
-public sealed class CheckerboardBlockCatalogRegistrar : InjectableBlock
+public sealed class BlackjackTable : InjectableBlock
 {
     private static readonly InjectableBlockData Data = new(
         "Approximately21_CheckerboardBlock",
@@ -11,13 +11,13 @@ public sealed class CheckerboardBlockCatalogRegistrar : InjectableBlock
         CreateCheckerboardTexture,
         "Approximately21_CheckerboardBlock.bundle",
         "BlackjackTableMesh",
-        "BlackjackTableMesh.bin",
+        "Approximately21.BlackjackTableMesh.bin",
         0.1f,
         0.06806712f,
         0.2529426f,
         0.045026492f);
 
-    public CheckerboardBlockCatalogRegistrar(IntPtr pointer)
+    public BlackjackTable(IntPtr pointer)
         : base(pointer)
     {
     }
@@ -25,7 +25,7 @@ public sealed class CheckerboardBlockCatalogRegistrar : InjectableBlock
     internal static void RegisterDefinition()
     {
         InjectableBlockConfiguration.Register(
-            typeof(CheckerboardBlockCatalogRegistrar),
+            typeof(BlackjackTable),
             Data,
             "Checkerboard Block",
             "A pink-and-black checkerboard test block.");
