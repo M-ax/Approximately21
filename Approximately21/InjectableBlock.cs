@@ -16,13 +16,23 @@ public sealed class InjectableBlockData
         string sourceItemName,
         Func<Texture2D> createIcon,
         string assetBundleFileName,
-        string assetMeshName)
+        string assetMeshName,
+        string rawMeshFileName,
+        float rawMeshScale,
+        float modelColorRed,
+        float modelColorGreen,
+        float modelColorBlue)
     {
         PrefabName = prefabName;
         SourceItemName = sourceItemName;
         CreateIcon = createIcon;
         AssetBundleFileName = assetBundleFileName;
         AssetMeshName = assetMeshName;
+        RawMeshFileName = rawMeshFileName;
+        RawMeshScale = rawMeshScale;
+        ModelColorRed = modelColorRed;
+        ModelColorGreen = modelColorGreen;
+        ModelColorBlue = modelColorBlue;
     }
 
     public string PrefabName { get; }
@@ -34,6 +44,16 @@ public sealed class InjectableBlockData
     public string AssetBundleFileName { get; }
 
     public string AssetMeshName { get; }
+
+    public string RawMeshFileName { get; }
+
+    public float RawMeshScale { get; }
+
+    public float ModelColorRed { get; }
+
+    public float ModelColorGreen { get; }
+
+    public float ModelColorBlue { get; }
 }
 
 public class InjectableBlock : MonoBehaviour
@@ -68,6 +88,16 @@ public class InjectableBlock : MonoBehaviour
     private string AssetBundleFileName => InjectableBlockConfiguration.GetAssetBundleFileName(GetType());
 
     private string AssetMeshName => InjectableBlockConfiguration.GetAssetMeshName(GetType());
+
+    private string RawMeshFileName => InjectableBlockConfiguration.GetRawMeshFileName(GetType());
+
+    private float RawMeshScale => InjectableBlockConfiguration.GetRawMeshScale(GetType());
+
+    private float ModelColorRed => InjectableBlockConfiguration.GetModelColorRed(GetType());
+
+    private float ModelColorGreen => InjectableBlockConfiguration.GetModelColorGreen(GetType());
+
+    private float ModelColorBlue => InjectableBlockConfiguration.GetModelColorBlue(GetType());
 
     protected InjectableBlock()
         : base(IntPtr.Zero)
@@ -293,13 +323,13 @@ public class InjectableBlock : MonoBehaviour
         return false;
     }
 
-    private static bool ApplyPlacedModel(EntityManager entityManager, Entity entity, Mesh mesh)
+    private bool ApplyPlacedModel(EntityManager entityManager, Entity entity, Mesh mesh)
     {
         if (!entityManager.HasComponent<CRPRendererData>(entity))
             return false;
 
         var rendererData = entityManager.GetComponentData<CRPRendererData>(entity);
-        var material = rendererData._material.Managed();
+        var material = GetPlacedMaterial(rendererData._material.Managed());
         if (material == null)
             return false;
 
@@ -308,10 +338,76 @@ public class InjectableBlock : MonoBehaviour
         {
             var colorMemory = entityManager.GetComponentData<CRPRendererMemory_Color>(entity);
             colorMemory.Unpack(out _, out var specularPacked);
-            entityManager.SetComponentData(entity, new CRPRendererMemory_Color(new float4(1f, 1f, 1f, 1f), specularPacked));
+            entityManager.SetComponentData(entity, new CRPRendererMemory_Color(
+                new float4(1f, 1f, 1f, 1f),
+                specularPacked));
         }
 
         return true;
+    }
+
+    private Material GetPlacedMaterial(Material sourceMaterial)
+    {
+        if (sourceMaterial == null)
+            return null;
+
+        if (BlockMaterialCache.TryGet(PrefabName, out var cachedMaterial))
+            return cachedMaterial;
+
+        var material = UnityEngine.Object.Instantiate(sourceMaterial);
+        material.name = PrefabName + "_Material";
+        var color = new Color(ModelColorRed, ModelColorGreen, ModelColorBlue, 1f);
+        var supportedColorProperties = string.Empty;
+        SetMaterialColorIfSupported(material, "_Color", color, ref supportedColorProperties);
+        SetMaterialColorIfSupported(material, "_BaseColor", color, ref supportedColorProperties);
+        SetMaterialColorIfSupported(material, "_FrameColor", color, ref supportedColorProperties);
+        SetMaterialColorIfSupported(material, "_TintColor", color, ref supportedColorProperties);
+        if (material.HasProperty("_Frame3DTexture"))
+            material.SetTexture("_Frame3DTexture", GetPlacedTexture(color));
+        _log.LogInfo($"{PrefabName} material uses shader '{material.shader.name}', standard color properties: {supportedColorProperties}, all properties: {GetShaderProperties(material.shader)}.");
+        BlockMaterialCache.Store(PrefabName, material);
+        return material;
+    }
+
+    private Texture3D GetPlacedTexture(Color color)
+    {
+        if (BlockTextureCache.TryGet(PrefabName, out var cachedTexture))
+            return cachedTexture;
+
+        const int size = 8;
+        var pixels = new Il2CppStructArray<Color>(size * size * size);
+        for (var index = 0; index < pixels.Length; index++)
+            pixels[index] = color;
+
+        var texture = new Texture3D(size, size, size, TextureFormat.RGBA32, false)
+        {
+            name = PrefabName + "_FeltTexture"
+        };
+        texture.SetPixels(pixels);
+        texture.Apply(false, false);
+        BlockTextureCache.Store(PrefabName, texture);
+        return texture;
+    }
+
+    private static void SetMaterialColorIfSupported(Material material, string propertyName, Color color, ref string supportedProperties)
+    {
+        if (material.HasProperty(propertyName))
+        {
+            material.SetColor(propertyName, color);
+            supportedProperties += string.IsNullOrEmpty(supportedProperties) ? propertyName : ", " + propertyName;
+        }
+    }
+
+    private static string GetShaderProperties(Shader shader)
+    {
+        if (shader == null)
+            return string.Empty;
+
+        var properties = string.Empty;
+        for (var index = 0; index < shader.GetPropertyCount(); index++)
+            properties += string.IsNullOrEmpty(properties) ? shader.GetPropertyName(index) : ", " + shader.GetPropertyName(index);
+
+        return properties;
     }
 
     private Mesh GetPlacedMesh()
@@ -319,13 +415,24 @@ public class InjectableBlock : MonoBehaviour
         if (BlockModelCache.TryGet(PrefabName, out var cachedMesh))
             return cachedMesh;
 
-        var assetMesh = TryLoadAssetBundleMesh();
+        var rawMesh = TryLoadRawMesh();
+        if (rawMesh != null)
+        {
+            BlockModelCache.Store(PrefabName, rawMesh);
+            _log.LogInfo($"Loaded {PrefabName}'s raw model from {RawMeshFileName}.");
+            return rawMesh;
+        }
+
+        var assetMesh = TryLoadAssetBundleMesh(out var assetBundleIsLoading);
         if (assetMesh != null)
         {
             BlockModelCache.Store(PrefabName, assetMesh);
             _log.LogInfo($"Loaded {PrefabName}'s model from {AssetBundleFileName}.");
             return assetMesh;
         }
+
+        if (assetBundleIsLoading)
+            return null;
 
         var placeholderMesh = ProceduralBlockMeshFactory.CreateCube(PrefabName);
         if (placeholderMesh != null)
@@ -337,8 +444,33 @@ public class InjectableBlock : MonoBehaviour
         return placeholderMesh;
     }
 
-    private Mesh TryLoadAssetBundleMesh()
+    private Mesh TryLoadRawMesh()
     {
+        if (string.IsNullOrWhiteSpace(RawMeshFileName))
+            return null;
+
+        var pluginDirectory = Path.GetDirectoryName(typeof(InjectableBlock).Assembly.Location);
+        if (string.IsNullOrWhiteSpace(pluginDirectory))
+            return null;
+
+        var meshPath = Path.Combine(pluginDirectory, RawMeshFileName);
+        if (!File.Exists(meshPath))
+            return null;
+
+        try
+        {
+            return RawMeshModelLoader.TryLoadMesh(meshPath, PrefabName + "_Mesh", RawMeshScale);
+        }
+        catch (Exception exception)
+        {
+            _log.LogWarning($"Could not load {PrefabName}'s raw model; trying the AssetBundle fallback. {exception.Message}");
+            return null;
+        }
+    }
+
+    private Mesh TryLoadAssetBundleMesh(out bool assetBundleIsLoading)
+    {
+        assetBundleIsLoading = false;
         if (string.IsNullOrWhiteSpace(AssetBundleFileName) || string.IsNullOrWhiteSpace(AssetMeshName))
             return null;
 
@@ -353,8 +485,12 @@ public class InjectableBlock : MonoBehaviour
         try
         {
             var mesh = AssetBundleModelLoader.TryLoadMesh(bundlePath, AssetMeshName);
+            assetBundleIsLoading = AssetBundleModelLoader.IsLoading(bundlePath);
             if (mesh == null)
-                _log.LogWarning($"Could not load mesh '{AssetMeshName}' from {bundlePath}; using the procedural placeholder.");
+            {
+                if (!assetBundleIsLoading)
+                    _log.LogWarning($"Could not load mesh '{AssetMeshName}' from {bundlePath}; using the procedural placeholder.");
+            }
             return mesh;
         }
         catch (Exception exception)

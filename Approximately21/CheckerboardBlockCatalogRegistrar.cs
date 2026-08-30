@@ -10,7 +10,12 @@ public sealed class CheckerboardBlockCatalogRegistrar : InjectableBlock
         "Frame Quarter",
         CreateCheckerboardTexture,
         "Approximately21_CheckerboardBlock.bundle",
-        "CheckerboardBlock");
+        "BlackjackTableMesh",
+        "BlackjackTableMesh.bin",
+        0.1f,
+        0.06806712f,
+        0.2529426f,
+        0.045026492f);
 
     public CheckerboardBlockCatalogRegistrar(IntPtr pointer)
         : base(pointer)
