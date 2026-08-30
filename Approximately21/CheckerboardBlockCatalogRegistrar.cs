@@ -11,6 +11,8 @@ public sealed class CheckerboardBlockCatalogRegistrar : MonoBehaviour
 {
     private const string BlockName = "Approximately21_CheckerboardBlock";
     private const string SourceItemName = "Frame Quarter";
+    private const string BlockDisplayName = "Checkerboard Block";
+    private const string BlockDescription = "A pink-and-black checkerboard test block.";
 
     private readonly ManualLogSource _log;
     private Core _registeredCore;
@@ -24,6 +26,7 @@ public sealed class CheckerboardBlockCatalogRegistrar : MonoBehaviour
     private bool _refreshErrorLogged;
     private int _refreshDelay = 120;
     private SCPrefab _sourcePrefab;
+    private Localization _localizedInstance;
     private static Texture2D _checkerboardTexture;
     private static CheckerboardBlockCatalogRegistrar _activeRegistrar;
     private static bool _inventoryPatchApplied;
@@ -39,6 +42,8 @@ public sealed class CheckerboardBlockCatalogRegistrar : MonoBehaviour
     {
         try
         {
+            TryInjectLocalization();
+
             var core = Core.Get();
             if (core == null || core._componentsMap == null || core._spaceshipComponents == null)
                 return;
@@ -81,6 +86,18 @@ public sealed class CheckerboardBlockCatalogRegistrar : MonoBehaviour
         _refreshErrorLogged = false;
         _refreshDelay = 120;
         _log.LogInfo($"Detected a new game core; registering {BlockName} beside {SourceItemName} when it is available.");
+    }
+
+    private void TryInjectLocalization()
+    {
+        var localization = Localization._cachedInstance;
+        if (localization == null || localization._map == null || ReferenceEquals(_localizedInstance, localization))
+            return;
+
+        localization._map[BlockName + "_Name"] = BlockDisplayName;
+        localization._map[BlockName + "_Desc"] = BlockDescription;
+        _localizedInstance = localization;
+        _log.LogInfo($"Added localization for {BlockName}.");
     }
 
     private bool Register(Core core)
