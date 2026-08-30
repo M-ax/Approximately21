@@ -58,7 +58,11 @@ public sealed class InjectableBlockData
 
 public class InjectableBlock : MonoBehaviour
 {
+    private const int MaterialGroupCount = 4;
+
     private readonly ManualLogSource _log;
+    private readonly System.Collections.Generic.Dictionary<int, EPC_Renderer> _additionalRenderers = new();
+    private readonly System.Collections.Generic.Dictionary<int, Entity> _additionalRendererEntities = new();
     private Core _registeredCore;
     private EPC_SpaceshipComponent _injectedBlock;
     private SCPrefab _injectedPrefab;
@@ -71,7 +75,6 @@ public class InjectableBlock : MonoBehaviour
     private bool _menuItemNotFoundLogged;
     private bool _refreshErrorLogged;
     private bool _placedModelApplied;
-    private bool _placedModelErrorLogged;
     private int _refreshDelay = 120;
     private Localization _localizedInstance;
     private static readonly System.Collections.Generic.List<InjectableBlock> ActiveBlocks = new();
@@ -160,6 +163,8 @@ public class InjectableBlock : MonoBehaviour
     {
         _registeredCore = core;
         _injectedBlock = null;
+        _additionalRenderers.Clear();
+        _additionalRendererEntities.Clear();
         _registered = false;
         _availabilityRefreshed = false;
         _menuRefreshed = false;
@@ -167,7 +172,6 @@ public class InjectableBlock : MonoBehaviour
         _menuItemNotFoundLogged = false;
         _refreshErrorLogged = false;
         _placedModelApplied = false;
-        _placedModelErrorLogged = false;
         _refreshDelay = 120;
         _log.LogInfo($"Detected a new game core; registering {PrefabName} beside {SourceItemName} when it is available.");
     }
@@ -216,6 +220,7 @@ public class InjectableBlock : MonoBehaviour
             _injectedBlock._iconTexture2D = _iconTexture ??= InjectableBlockConfiguration.CreateIcon(GetType());
             UnityEngine.Object.DontDestroyOnLoad(_injectedBlock.gameObject);
             _injectedBlock.gameObject.SetActive(false);
+            ConfigureRendererChildren(_injectedBlock);
 
             core._componentsMap.Add(_injectedPrefab, _injectedBlock);
             EnsureCatalogContains(core, _injectedBlock);
@@ -256,6 +261,47 @@ public class InjectableBlock : MonoBehaviour
         core._spaceshipComponents = expandedComponents;
     }
 
+    private void ConfigureRendererChildren(EPC_SpaceshipComponent block)
+    {
+        var renderers = block.GetComponentsInChildren<EPC_Renderer>(true);
+        if (renderers.Length == 0)
+            throw new InvalidOperationException($"{SourceItemName} has no renderer template for {PrefabName}.");
+
+        var mesh = GetPlacedMesh(0);
+        if (mesh == null)
+            throw new InvalidOperationException($"Could not load {PrefabName}'s table mesh.");
+
+        ConfigureRenderer(renderers[0], mesh, GetMaterialColor(0));
+        for (var materialGroup = 1; materialGroup < MaterialGroupCount; materialGroup++)
+        {
+            var groupMesh = GetPlacedMesh(materialGroup);
+            if (groupMesh == null)
+                continue;
+
+            var groupObject = new GameObject($"{PrefabName}_Renderer_{materialGroup}");
+            groupObject.transform.SetParent(block.transform, false);
+            var groupRenderer = groupObject.AddComponent<EPC_Renderer>();
+            ConfigureRenderer(groupRenderer, groupMesh, GetMaterialColor(materialGroup), renderers[0]);
+            _additionalRenderers.Add(materialGroup, groupRenderer);
+        }
+
+        _log.LogInfo($"Configured {PrefabName}'s native table renderers.");
+    }
+
+    private static void ConfigureRenderer(
+        EPC_Renderer renderer,
+        Mesh mesh,
+        SpaceshipComponentColor color,
+        EPC_Renderer sourceRenderer = null)
+    {
+        renderer._mesh = mesh;
+        renderer._submeshID = 0;
+        renderer._spaceshipColor = color;
+        if (sourceRenderer != null)
+            renderer._material = sourceRenderer._material;
+    }
+
+
     private bool RefreshAvailableComponents(Core core)
     {
         try
@@ -278,73 +324,96 @@ public class InjectableBlock : MonoBehaviour
 
     private bool TryApplyPlacedModel()
     {
-        if (_injectedBlock == null)
+        if (_injectedBlock == null || GetPlacedMesh(0) == null)
             return false;
 
-        var mesh = GetPlacedMesh();
-        if (mesh == null)
+        var world = World.DefaultGameObjectInjectionWorld;
+        if (world == null || !world.IsCreated)
             return false;
 
-        try
-        {
-            var rootEntity = EntityPrefabComponent.Get(_injectedBlock);
-            var worlds = World.All;
-            for (var worldIndex = 0; worldIndex < worlds.Count; worldIndex++)
-            {
-                var world = worlds[worldIndex];
-                if (world == null || !world.IsCreated)
-                    continue;
-
-                var entityManager = world.EntityManager;
-                if (!world.IsCreated || !entityManager.Exists(rootEntity))
-                    continue;
-
-                var modelApplied = ApplyPlacedModel(entityManager, rootEntity, mesh);
-                if (entityManager.HasBuffer<LinkedEntityGroup>(rootEntity))
-                {
-                    var linkedEntities = entityManager.GetBuffer<LinkedEntityGroup>(rootEntity, true);
-                    for (var index = 0; index < linkedEntities.Length; index++)
-                        modelApplied |= ApplyPlacedModel(entityManager, linkedEntities[index].Value, mesh);
-                }
-
-                if (modelApplied)
-                    return true;
-            }
-        }
-        catch (Exception exception)
-        {
-            if (!_placedModelErrorLogged)
-            {
-                _placedModelErrorLogged = true;
-                _log.LogWarning($"Could not update {PrefabName}'s ECS prefab renderer: {exception.Message}");
-            }
-        }
-
-        return false;
+        var rootEntity = EntityPrefabComponent.Get(_injectedBlock);
+        return world.EntityManager.Exists(rootEntity) &&
+               ApplyPlacedModelGroups(world.EntityManager, rootEntity, GetPlacedMesh(0));
     }
 
-    private bool ApplyPlacedModel(EntityManager entityManager, Entity entity, Mesh mesh)
+    private bool ApplyPlacedModelGroups(EntityManager entityManager, Entity rootEntity, Mesh firstMesh)
     {
-        if (!entityManager.HasComponent<CRPRendererData>(entity))
+        var rendererEntity = rootEntity;
+        if (!entityManager.HasComponent<CRPRendererData>(rendererEntity))
+        {
+            if (!entityManager.HasBuffer<LinkedEntityGroup>(rootEntity))
+                return false;
+
+            var linkedEntities = entityManager.GetBuffer<LinkedEntityGroup>(rootEntity, true);
+            for (var index = 0; index < linkedEntities.Length; index++)
+            {
+                if (!entityManager.HasComponent<CRPRendererData>(linkedEntities[index].Value))
+                    continue;
+
+                rendererEntity = linkedEntities[index].Value;
+                break;
+            }
+        }
+
+        if (!entityManager.HasComponent<CRPRendererData>(rendererEntity) ||
+            !ApplyPlacedModel(entityManager, rendererEntity, firstMesh, GetMaterialColor(0)))
             return false;
 
+        foreach (var (materialGroup, renderer) in _additionalRenderers)
+        {
+            var mesh = GetPlacedMesh(materialGroup);
+            if (mesh == null)
+                continue;
+
+            if (!_additionalRendererEntities.TryGetValue(materialGroup, out var rendererGroupEntity) ||
+                !entityManager.Exists(rendererGroupEntity))
+            {
+                rendererGroupEntity = renderer.CreateLinkedGroupChild(entityManager, rootEntity);
+                _additionalRendererEntities[materialGroup] = rendererGroupEntity;
+            }
+
+            if (!entityManager.HasComponent<CRPRendererData>(rendererGroupEntity) ||
+                !ApplyPlacedModel(entityManager, rendererGroupEntity, mesh, GetMaterialColor(materialGroup)))
+                return false;
+        }
+
+        return true;
+    }
+
+    private bool ApplyPlacedModel(EntityManager entityManager, Entity entity, Mesh mesh, SpaceshipComponentColor color)
+    {
         var rendererData = entityManager.GetComponentData<CRPRendererData>(entity);
         var material = GetPlacedMaterial(rendererData._material.Managed());
         if (material == null)
             return false;
 
         entityManager.SetComponentData(entity, new CRPRendererData(mesh, 0, material));
+        SpaceshipComponentExtensions.GetProperties(
+            color,
+            out var paintColor,
+            out var paintSpecular);
+        EPC_SpaceshipComponent.BlueprintFunctions.LoadSpaceshipComponentColorsSet(
+            entityManager,
+            entity,
+            color, color, color, color, color, color, color, color);
         if (entityManager.HasComponent<CRPRendererMemory_Color>(entity))
         {
-            var colorMemory = entityManager.GetComponentData<CRPRendererMemory_Color>(entity);
-            colorMemory.Unpack(out _, out var specularPacked);
-            entityManager.SetComponentData(entity, new CRPRendererMemory_Color(
-                new float4(1f, 1f, 1f, 1f),
-                specularPacked));
+            entityManager.SetComponentData(entity, new CRPRendererMemory_Color(paintColor, paintSpecular));
         }
 
         return true;
     }
+
+    private static SpaceshipComponentColor GetMaterialColor(int materialGroup)
+        => materialGroup switch
+        {
+            0 => SpaceshipComponentColor.Brown,
+            1 => SpaceshipComponentColor.Green,
+            2 => SpaceshipComponentColor.LightGray,
+            3 => SpaceshipComponentColor.Brown,
+            _ => SpaceshipComponentColor.Green
+        };
+
 
     private Material GetPlacedMaterial(Material sourceMaterial)
     {
@@ -364,7 +433,7 @@ public class InjectableBlock : MonoBehaviour
         SetMaterialColorIfSupported(material, "_TintColor", color, ref supportedColorProperties);
         if (material.HasProperty("_Frame3DTexture"))
             material.SetTexture("_Frame3DTexture", GetPlacedTexture(color));
-        _log.LogInfo($"{PrefabName} material uses shader '{material.shader.name}', standard color properties: {supportedColorProperties}, all properties: {GetShaderProperties(material.shader)}.");
+        _log.LogInfo($"{PrefabName} material uses '{sourceMaterial.name}' and shader '{material.shader.name}', supported color properties: {supportedColorProperties}, all properties: {GetShaderProperties(material.shader)}.");
         BlockMaterialCache.Store(PrefabName, material);
         return material;
     }
@@ -410,29 +479,37 @@ public class InjectableBlock : MonoBehaviour
         return properties;
     }
 
-    private Mesh GetPlacedMesh()
+    private Mesh GetPlacedMesh(int materialGroup)
     {
-        if (BlockModelCache.TryGet(PrefabName, out var cachedMesh))
-            return cachedMesh;
+        if (BlockModelCache.TryGet(PrefabName, out var cachedMeshes))
+            return materialGroup < cachedMeshes.Length ? cachedMeshes[materialGroup] : null;
 
-        var rawMesh = TryLoadRawMesh();
-        if (rawMesh != null)
+        if (materialGroup != 0)
         {
-            BlockModelCache.Store(PrefabName, rawMesh);
-            _log.LogInfo($"Loaded {PrefabName}'s raw model from {RawMeshFileName}.");
-            return rawMesh;
+            GetPlacedMesh(0);
+            return BlockModelCache.TryGet(PrefabName, out cachedMeshes) && materialGroup < cachedMeshes.Length
+                ? cachedMeshes[materialGroup]
+                : null;
         }
 
-        var assetMesh = TryLoadAssetBundleMesh(out var assetBundleIsLoading);
-        if (assetMesh != null)
+        var pluginDirectory = Path.GetDirectoryName(typeof(InjectableBlock).Assembly.Location);
+        var meshPath = string.IsNullOrWhiteSpace(pluginDirectory) || string.IsNullOrWhiteSpace(RawMeshFileName)
+            ? null
+            : Path.Combine(pluginDirectory, RawMeshFileName);
+        if (!string.IsNullOrWhiteSpace(meshPath) && File.Exists(meshPath))
         {
-            BlockModelCache.Store(PrefabName, assetMesh);
-            _log.LogInfo($"Loaded {PrefabName}'s model from {AssetBundleFileName}.");
-            return assetMesh;
+            try
+            {
+                var rawMeshes = RawMeshModelLoader.TryLoadMeshes(meshPath, PrefabName + "_Mesh", RawMeshScale);
+                BlockModelCache.Store(PrefabName, rawMeshes);
+                _log.LogInfo($"Loaded {PrefabName}'s raw model from {RawMeshFileName}.");
+                return rawMeshes[0];
+            }
+            catch (Exception exception)
+            {
+                _log.LogWarning($"Could not load {PrefabName}'s raw model; trying the AssetBundle fallback. {exception}");
+            }
         }
-
-        if (assetBundleIsLoading)
-            return null;
 
         var placeholderMesh = ProceduralBlockMeshFactory.CreateCube(PrefabName);
         if (placeholderMesh != null)
@@ -442,62 +519,6 @@ public class InjectableBlock : MonoBehaviour
         }
 
         return placeholderMesh;
-    }
-
-    private Mesh TryLoadRawMesh()
-    {
-        if (string.IsNullOrWhiteSpace(RawMeshFileName))
-            return null;
-
-        var pluginDirectory = Path.GetDirectoryName(typeof(InjectableBlock).Assembly.Location);
-        if (string.IsNullOrWhiteSpace(pluginDirectory))
-            return null;
-
-        var meshPath = Path.Combine(pluginDirectory, RawMeshFileName);
-        if (!File.Exists(meshPath))
-            return null;
-
-        try
-        {
-            return RawMeshModelLoader.TryLoadMesh(meshPath, PrefabName + "_Mesh", RawMeshScale);
-        }
-        catch (Exception exception)
-        {
-            _log.LogWarning($"Could not load {PrefabName}'s raw model; trying the AssetBundle fallback. {exception.Message}");
-            return null;
-        }
-    }
-
-    private Mesh TryLoadAssetBundleMesh(out bool assetBundleIsLoading)
-    {
-        assetBundleIsLoading = false;
-        if (string.IsNullOrWhiteSpace(AssetBundleFileName) || string.IsNullOrWhiteSpace(AssetMeshName))
-            return null;
-
-        var pluginDirectory = Path.GetDirectoryName(typeof(InjectableBlock).Assembly.Location);
-        if (string.IsNullOrWhiteSpace(pluginDirectory))
-            return null;
-
-        var bundlePath = Path.Combine(pluginDirectory, AssetBundleFileName);
-        if (!File.Exists(bundlePath))
-            return null;
-
-        try
-        {
-            var mesh = AssetBundleModelLoader.TryLoadMesh(bundlePath, AssetMeshName);
-            assetBundleIsLoading = AssetBundleModelLoader.IsLoading(bundlePath);
-            if (mesh == null)
-            {
-                if (!assetBundleIsLoading)
-                    _log.LogWarning($"Could not load mesh '{AssetMeshName}' from {bundlePath}; using the procedural placeholder.");
-            }
-            return mesh;
-        }
-        catch (Exception exception)
-        {
-            _log.LogWarning($"Could not load {PrefabName}'s model AssetBundle; using the procedural placeholder. {exception.Message}");
-            return null;
-        }
     }
 
     private bool RefreshInventoryMenus()
