@@ -138,6 +138,9 @@ public class InjectableBlock : MonoBehaviour
                     _log.LogInfo($"Applied {PrefabName}'s placed model to its ECS prefab renderer.");
             }
 
+            if (_registered)
+                UpdateAttachedComponents();
+
             if (!_registered || _refreshDelay-- > 0)
                 return;
 
@@ -226,6 +229,9 @@ public class InjectableBlock : MonoBehaviour
             _log.LogInfo($"Registered {PrefabName} beside {SourceItemName} with its own prefab identity.");
         }
 
+        if (!TryConfigureAttachedComponents(_injectedBlock, core))
+            return false;
+
         EnsureInventoryPatchApplied();
         return true;
     }
@@ -258,6 +264,12 @@ public class InjectableBlock : MonoBehaviour
 
         expandedComponents[components.Length] = component;
         core._spaceshipComponents = expandedComponents;
+    }
+
+    protected virtual bool TryConfigureAttachedComponents(EPC_SpaceshipComponent block, Core core) => true;
+
+    protected virtual void UpdateAttachedComponents()
+    {
     }
 
     private void ConfigureRendererChildren(EPC_SpaceshipComponent block)
@@ -330,7 +342,10 @@ public class InjectableBlock : MonoBehaviour
         if (world == null || !world.IsCreated)
             return false;
 
-        var rootEntity = EntityPrefabComponent.Get(_injectedBlock);
+        var entityMap = EntityPrefabComponent.GameObjectToEntityMap;
+        if (entityMap == null || !entityMap.TryGetValue(_injectedBlock.gameObject, out var rootEntity))
+            return false;
+
         return world.EntityManager.Exists(rootEntity) &&
                ApplyPlacedModelGroups(world.EntityManager, rootEntity, GetPlacedMesh(0));
     }
@@ -478,7 +493,7 @@ public class InjectableBlock : MonoBehaviour
         return properties;
     }
 
-    private Mesh GetPlacedMesh(int materialGroup)
+    protected Mesh GetPlacedMesh(int materialGroup)
     {
         if (BlockModelCache.TryGet(PrefabName, out var cachedMeshes))
             return materialGroup < cachedMeshes.Length ? cachedMeshes[materialGroup] : null;

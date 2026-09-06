@@ -49,8 +49,20 @@
             <HintPath>$(ApproximatelyUpDirectory)\BepInEx\interop\Unity.Mathematics.dll</HintPath>
             <Private>false</Private>
         </Reference>
+        <Reference Include="Unity.Transforms">
+            <HintPath>$(ApproximatelyUpDirectory)\BepInEx\interop\Unity.Transforms.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
         <Reference Include="UnityEngine.CoreModule">
             <HintPath>$(ApproximatelyUpDirectory)\BepInEx\interop\UnityEngine.CoreModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="Unity.InputSystem">
+            <HintPath>$(ApproximatelyUpDirectory)\BepInEx\interop\Unity.InputSystem.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="UnityEngine.UI">
+            <HintPath>$(ApproximatelyUpDirectory)\BepInEx\interop\UnityEngine.UI.dll</HintPath>
             <Private>false</Private>
         </Reference>
         <Reference Include="UnityEngine.AssetBundleModule">
