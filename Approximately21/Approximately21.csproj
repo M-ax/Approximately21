@@ -22,10 +22,6 @@
     </ItemGroup>
 
     <ItemGroup>
-        <EmbeddedResource Include="..\lib\BlackjackTableBundle\Built\BlackjackTableMesh.bin" LogicalName="Approximately21.BlackjackTableMesh.bin" />
-    </ItemGroup>
-
-    <ItemGroup>
         <Reference Include="Assembly-CSharp">
             <HintPath>$(ApproximatelyUpDirectory)\BepInEx\interop\Assembly-CSharp.dll</HintPath>
             <Private>false</Private>
@@ -69,5 +65,12 @@
             <HintPath>$(ApproximatelyUpDirectory)\BepInEx\interop\UnityEngine.AssetBundleModule.dll</HintPath>
             <Private>false</Private>
         </Reference>
+    </ItemGroup>
+
+    <ItemGroup>
+      <EmbeddedResource Include="..\lib\BlackjackTableBundle\Built\BlackjackTableMesh.bin">
+        <LogicalName>Approximately21.BlackjackTableMesh.bin</LogicalName>
+        <Link>Assets\BlackjackTableMesh.bin</Link>
+      </EmbeddedResource>
     </ItemGroup>
 </Project>

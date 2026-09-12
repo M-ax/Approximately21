@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Il2CppInterop.Runtime.Attributes;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
@@ -7,115 +7,108 @@ using Unity.Entities;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.UI;
 using Unity.Transforms;
 
 namespace Approximately21;
 
-public sealed class BlackjackTable : InjectableBlock
+public abstract class InteractionBase
 {
-    private const float InteractionSurfaceHeight = 0.36f;
-    private const float InteractionSurfaceWidth = 1.04f;
-    private const float InteractionSurfaceDepth = 0.58f;
-    private const float InteractionSurfaceCenterZ = 0.26f;
     private const float PointerSize = 0.0225f;
     private const float SurfaceOffset = 0.004f;
     private const float PointerOffset = 0.01f;
-    private const float ButtonWidth = 0.3f;
-    private const float ButtonDepth = 0.1f;
     private const float ButtonOffset = 0.012f;
 
-    private static readonly InjectableBlockData Data = new(
-        "Approximately21_BlackjackTable",
-        "Frame Quarter",
-        CreateCheckerboardTexture,
-        "Approximately21_BlackjackTable.bundle",
-        "BlackjackTableMesh",
-        "Approximately21.BlackjackTableMesh.bin",
-        0.1f,
-        0.06806712f,
-        0.2529426f,
-        0.045026492f);
+    private readonly string _prefabName;
+    private readonly List<InteractionButton> _buttons = new();
+    private readonly List<InteractionInstance> _interactionInstances = new();
+    private readonly List<EPC_Renderer> _buttonRenderers = new();
     private Mesh _interactionQuad;
     private Mesh _pointerQuad;
-    private Mesh _buttonQuad;
     private Material _interactionSurfaceMaterial;
     private Material _pointerMaterial;
     private Material _buttonMaterial;
     private EPC_Renderer _interactionSurfaceRenderer;
     private EPC_Renderer _pointerRenderer;
-    private EPC_Renderer _testButtonRenderer;
-    private readonly List<InteractionInstance> _interactionInstances = new();
     private World _cameraWorld;
     private Entity _cameraEntity;
     private bool _renderWarningLogged;
-    private bool _renderReadyLogged;
     private bool _cameraReadyLogged;
     private bool _pointerVisibleLogged;
     private bool _pointerFailureLogged;
     private int _cameraPriority = int.MinValue;
     private int _interactionDiscoveryDelay;
 
-    public BlackjackTable(IntPtr pointer)
-        : base(pointer)
+    protected InteractionBase(string prefabName)
     {
+        _prefabName = prefabName;
     }
 
-    internal static void RegisterDefinition()
+    protected void RegisterButton(InteractionButton button)
     {
-        InjectableBlockConfiguration.Register(
-            typeof(BlackjackTable),
-            Data,
-            "Blackjack Table",
-            "A blackjack table.");
+        if (button == null)
+            throw new ArgumentNullException(nameof(button));
+        if (_interactionSurfaceRenderer != null)
+            throw new InvalidOperationException("Buttons must be registered before interaction renderers are configured.");
+
+        for (var index = 0; index < _buttons.Count; index++)
+        {
+            if (_buttons[index].Name == button.Name)
+                throw new InvalidOperationException($"An interaction button named '{button.Name}' is already registered.");
+        }
+
+        _buttons.Add(button);
     }
 
-    protected override bool TryConfigureAttachedComponents(EPC_SpaceshipComponent block, Core core)
+    public bool TryConfigureAttachedComponents(
+        EPC_SpaceshipComponent block,
+        Core core,
+        Bounds interactionBounds)
     {
         EnsureInteractionMeshes();
-        if (_interactionSurfaceRenderer != null && _pointerRenderer != null && _testButtonRenderer != null)
+        if (_interactionSurfaceRenderer != null && _pointerRenderer != null &&
+            _buttonRenderers.Count == _buttons.Count)
             return true;
 
         var renderers = block.GetComponentsInChildren<EPC_Renderer>(true);
         if (renderers.Length == 0)
             return false;
 
-        var interactionBounds = GetInteractionBounds();
         _interactionSurfaceRenderer = CreateInteractionRenderer(
             block,
             renderers[0],
             _interactionQuad,
-            Data.PrefabName + "_InteractionSurfaceRenderer",
+            _prefabName + "_InteractionSurfaceRenderer",
             interactionBounds.center,
             new Vector3(interactionBounds.size.x, 1f, interactionBounds.size.z));
         _pointerRenderer = CreateInteractionRenderer(
             block,
             renderers[0],
             _pointerQuad,
-            Data.PrefabName + "_PointerRenderer",
+            _prefabName + "_PointerRenderer",
             interactionBounds.center,
             new Vector3(PointerSize, PointerSize, PointerSize));
-        _testButtonRenderer = CreateInteractionRenderer(
-            block,
-            renderers[0],
-            _buttonQuad,
-            Data.PrefabName + "_TestButtonRenderer",
-            interactionBounds.center,
-            Vector3.one);
-        Plugin.Log.LogInfo(
-            $"Configured {Data.PrefabName}'s interaction geometry from tabletop bounds " +
+        for (var index = 0; index < _buttons.Count; index++)
+        {
+            var button = _buttons[index];
+            _buttonRenderers.Add(CreateInteractionRenderer(
+                block,
+                renderers[0],
+                button.Mesh,
+                $"{_prefabName}_{button.Name}ButtonRenderer",
+                interactionBounds.center + button.LocalOffset,
+                Vector3.one));
+        }
+
+        Plugin.LogInfo(
+            $"Configured {_prefabName}'s interaction geometry from tabletop bounds " +
             $"center={interactionBounds.center}, size={interactionBounds.size}.");
         return true;
     }
 
-    protected override void UpdateAttachedComponents()
+    public void Update(Mesh tableMesh, Bounds interactionBounds)
     {
         try
         {
-            var tableMesh = GetPlacedMesh(0);
-            if (tableMesh == null)
-                return;
-
             if (_interactionDiscoveryDelay-- <= 0)
             {
                 _interactionDiscoveryDelay = 120;
@@ -124,26 +117,17 @@ public sealed class BlackjackTable : InjectableBlock
 
             var hasCameraRay = TryGetCameraRay(out var cameraRay);
             var primaryClickPressed = IsPrimaryClickPressed();
-
             for (var index = _interactionInstances.Count - 1; index >= 0; index--)
             {
                 var instance = _interactionInstances[index];
-                if (instance.World == null || !instance.World.IsCreated ||
-                    !instance.World.EntityManager.Exists(instance.TableEntity) ||
-                    !instance.World.EntityManager.Exists(instance.SurfaceEntity) ||
-                    !instance.World.EntityManager.Exists(instance.PointerEntity) ||
-                    !instance.World.EntityManager.Exists(instance.ButtonEntity))
+                if (!IsInteractionInstanceValid(instance))
                 {
                     instance.Dispose();
                     _interactionInstances.RemoveAt(index);
                     continue;
                 }
 
-                UpdateInteractionLayer(
-                    instance,
-                    hasCameraRay,
-                    cameraRay,
-                    primaryClickPressed);
+                UpdateInteractionLayer(instance, hasCameraRay, cameraRay, primaryClickPressed, interactionBounds);
             }
         }
         catch (Exception exception)
@@ -152,8 +136,28 @@ public sealed class BlackjackTable : InjectableBlock
                 return;
 
             _renderWarningLogged = true;
-            Plugin.Log.LogWarning($"Could not render {Data.PrefabName}'s interaction layer: {exception}");
+            Plugin.LogWarning($"Could not render {_prefabName}'s interaction layer: {exception}");
         }
+    }
+
+    private bool IsInteractionInstanceValid(InteractionInstance instance)
+    {
+        if (instance.World == null || !instance.World.IsCreated)
+            return false;
+
+        var entityManager = instance.World.EntityManager;
+        if (!entityManager.Exists(instance.TableEntity) || !entityManager.Exists(instance.SurfaceEntity) ||
+            !entityManager.Exists(instance.PointerEntity))
+            return false;
+
+        for (var index = 0; index < _buttons.Count; index++)
+        {
+            if (!instance.ButtonEntities.TryGetValue(_buttons[index], out var buttonEntity) ||
+                !entityManager.Exists(buttonEntity))
+                return false;
+        }
+
+        return true;
     }
 
     private void RefreshInteractionInstances(Mesh tableMesh)
@@ -205,38 +209,36 @@ public sealed class BlackjackTable : InjectableBlock
                         continue;
 
                     var tableRoot = GetHierarchyRoot(entityManager, tableEntity);
-                    var surfaceEntity = FindInteractionEntity(
-                        entityManager,
-                        tableRoot,
-                        _interactionQuad.name,
-                        entities);
-                    var pointerEntity = FindInteractionEntity(
-                        entityManager,
-                        tableRoot,
-                        _pointerQuad.name,
-                        entities);
-                    var buttonEntity = FindInteractionEntity(
-                        entityManager,
-                        tableRoot,
-                        _buttonQuad.name,
-                        entities);
-                    if (surfaceEntity.Equals(Entity.Null) || pointerEntity.Equals(Entity.Null) ||
-                        buttonEntity.Equals(Entity.Null))
+                    var surfaceEntity = FindInteractionEntity(entityManager, tableRoot, _interactionQuad.name, entities);
+                    var pointerEntity = FindInteractionEntity(entityManager, tableRoot, _pointerQuad.name, entities);
+                    if (surfaceEntity.Equals(Entity.Null) || pointerEntity.Equals(Entity.Null))
                         continue;
 
-                    AlignInteractionSurface(
-                        entityManager,
-                        tableEntity,
-                        surfaceEntity,
-                        ToMatrix(entityManager.GetComponentData<LocalToWorld>(tableEntity))
-                            .MultiplyPoint3x4(GetInteractionBounds().center));
-                    var instance = TakePreviousInteractionInstance(previousInstances, world, tableEntity);
-                    if (instance == null)
-                        instance = new InteractionInstance(world, tableEntity);
+                    var instance = TakePreviousInteractionInstance(previousInstances, world, tableEntity) ??
+                                   new InteractionInstance(world, tableEntity);
                     instance.SurfaceEntity = surfaceEntity;
                     instance.PointerEntity = pointerEntity;
-                    instance.ButtonEntity = buttonEntity;
-                    EnsureTableUi(instance);
+                    instance.ButtonEntities.Clear();
+                    var hasAllButtons = true;
+                    for (var buttonIndex = 0; buttonIndex < _buttons.Count; buttonIndex++)
+                    {
+                        var button = _buttons[buttonIndex];
+                        var buttonEntity = FindInteractionEntity(entityManager, tableRoot, button.Mesh.name, entities);
+                        if (buttonEntity.Equals(Entity.Null))
+                        {
+                            hasAllButtons = false;
+                            break;
+                        }
+
+                        instance.ButtonEntities.Add(button, buttonEntity);
+                    }
+
+                    if (!hasAllButtons)
+                    {
+                        instance.Dispose();
+                        continue;
+                    }
+
                     _interactionInstances.Add(instance);
                 }
             }
@@ -256,79 +258,67 @@ public sealed class BlackjackTable : InjectableBlock
         InteractionInstance instance,
         bool hasCameraRay,
         Ray cameraRay,
-        bool primaryClickPressed)
+        bool primaryClickPressed,
+        Bounds interactionBounds)
     {
         var entityManager = instance.World.EntityManager;
-        var tableEntity = instance.TableEntity;
-        var surfaceEntity = instance.SurfaceEntity;
-        var pointerEntity = instance.PointerEntity;
-        var buttonEntity = instance.ButtonEntity;
-        if (!_renderReadyLogged)
-        {
-            _renderReadyLogged = true;
-            Plugin.Log.LogInfo($"Found a live {Data.PrefabName} renderer; updating its interaction pointer.");
-        }
-
-        var tableMatrix = ToMatrix(entityManager.GetComponentData<LocalToWorld>(tableEntity));
-        var interactionBounds = GetInteractionBounds();
+        var tableMatrix = ToMatrix(entityManager.GetComponentData<LocalToWorld>(instance.TableEntity));
         var surfacePoint = tableMatrix.MultiplyPoint3x4(interactionBounds.center);
         var surfaceNormal = tableMatrix.MultiplyVector(Vector3.up).normalized;
         if (!hasCameraRay)
         {
-            SetPointerVisible(entityManager, pointerEntity, false);
+            SetPointerVisible(entityManager, instance.PointerEntity, false);
             LogPointerFailure("no rendering CRPCameraData entity was found");
             return;
         }
 
         if (Vector3.Dot(surfaceNormal, cameraRay.origin - surfacePoint) < 0f)
             surfaceNormal = -surfaceNormal;
-        AlignInteractionSurface(
-            entityManager,
-            tableEntity,
-            buttonEntity,
-            surfacePoint + surfaceNormal * ButtonOffset);
-        AlignInteractionSurface(
-            entityManager,
-            tableEntity,
-            surfaceEntity,
+        AlignInteractionSurface(entityManager, instance.TableEntity, instance.SurfaceEntity,
             surfacePoint + surfaceNormal * SurfaceOffset);
-
-        if (!TryGetSurfaceHit(
-                cameraRay,
-                surfaceNormal,
-                surfacePoint,
-                tableMatrix,
-                interactionBounds,
-                out cameraRay,
-                out var distance,
-                out var localHit))
+        for (var buttonIndex = 0; buttonIndex < _buttons.Count; buttonIndex++)
         {
-            SetPointerVisible(entityManager, pointerEntity, false);
-            LogPointerFailure(
-                $"ECS camera axis from {cameraRay.origin} does not intersect the tabletop bounds");
+            var button = _buttons[buttonIndex];
+            var buttonCenter = tableMatrix.MultiplyPoint3x4(interactionBounds.center + button.LocalOffset);
+            AlignInteractionSurface(entityManager, instance.TableEntity, instance.ButtonEntities[button],
+                buttonCenter + surfaceNormal * ButtonOffset);
+        }
+
+        if (!TryGetSurfaceHit(cameraRay, surfaceNormal, surfacePoint, tableMatrix, interactionBounds,
+                out cameraRay, out var distance, out var localHit))
+        {
+            SetPointerVisible(entityManager, instance.PointerEntity, false);
+            LogPointerFailure($"ECS camera axis from {cameraRay.origin} does not intersect the tabletop bounds");
             return;
         }
 
         var worldHit = cameraRay.GetPoint(distance) + surfaceNormal * PointerOffset;
-        var rootEntity = GetHierarchyRoot(entityManager, pointerEntity);
+        var rootEntity = GetHierarchyRoot(entityManager, instance.PointerEntity);
         var rootMatrix = entityManager.HasComponent<LocalToWorld>(rootEntity)
             ? ToMatrix(entityManager.GetComponentData<LocalToWorld>(rootEntity))
             : tableMatrix;
         var pointerPosition = rootMatrix.inverse.MultiplyPoint3x4(worldHit);
-        var pointerTransform = entityManager.GetComponentData<LocalTransform>(pointerEntity);
+        var pointerTransform = entityManager.GetComponentData<LocalTransform>(instance.PointerEntity);
         pointerTransform.Position = new float3(pointerPosition.x, pointerPosition.y, pointerPosition.z);
         pointerTransform.Scale = PointerSize;
-        entityManager.SetComponentData(pointerEntity, pointerTransform);
+        entityManager.SetComponentData(instance.PointerEntity, pointerTransform);
         if (!_pointerVisibleLogged)
         {
             _pointerVisibleLogged = true;
-            Plugin.Log.LogInfo($"Showing {Data.PrefabName}'s interaction pointer at local position {pointerPosition}.");
+            Plugin.LogInfo($"Showing {_prefabName}'s interaction pointer at local position {pointerPosition}.");
         }
 
-        if (primaryClickPressed && instance.TestButton != null && IsTestButtonHit(localHit, interactionBounds))
+        if (!primaryClickPressed)
+            return;
+
+        for (var buttonIndex = 0; buttonIndex < _buttons.Count; buttonIndex++)
         {
-            instance.GameState.RecordTestButtonClick(instance.TableEntity.Index);
-            instance.TestButton.onClick.Invoke();
+            var button = _buttons[buttonIndex];
+            if (!button.Contains(localHit, interactionBounds))
+                continue;
+
+            button.InvokeClick(instance.TableEntity.Index);
+            break;
         }
     }
 
@@ -350,27 +340,6 @@ public sealed class BlackjackTable : InjectableBlock
         return null;
     }
 
-    [HideFromIl2Cpp]
-    private void EnsureTableUi(InteractionInstance instance)
-    {
-        if (instance.UiRoot != null)
-            return;
-
-        var buttonObject = new GameObject($"{Data.PrefabName}_UiButton_{instance.TableEntity.Index}");
-        UnityEngine.Object.DontDestroyOnLoad(buttonObject);
-        instance.UiRoot = buttonObject;
-        instance.TestButton = buttonObject.AddComponent<Button>();
-        Plugin.Log.LogInfo(
-            $"Created blackjack game state and test button for table entity {instance.TableEntity.Index}.");
-    }
-
-    private static bool IsTestButtonHit(Vector3 localHit, Bounds interactionBounds)
-    {
-        var center = interactionBounds.center;
-        return Mathf.Abs(localHit.x - center.x) <= ButtonWidth * 0.5f &&
-               Mathf.Abs(localHit.z - center.z) <= ButtonDepth * 0.5f;
-    }
-
     private bool IsPrimaryClickPressed()
     {
         var mouse = Mouse.current;
@@ -383,26 +352,39 @@ public sealed class BlackjackTable : InjectableBlock
             return;
 
         _pointerFailureLogged = true;
-        Plugin.Log.LogInfo($"Hiding {Data.PrefabName}'s interaction pointer because {reason}.");
+        Plugin.LogInfo($"Hiding {_prefabName}'s interaction pointer because {reason}.");
     }
 
     private void ConfigureLiveInteractionRenderer(EntityManager entityManager, Entity entity)
     {
         var rendererData = entityManager.GetComponentData<CRPRendererData>(entity);
         var mesh = rendererData.GetDrawDataMeshReference()._meshReference.Managed();
-        if (mesh == null || (mesh.name != _interactionQuad.name && mesh.name != _pointerQuad.name &&
-            mesh.name != _buttonQuad.name))
+        if (mesh == null || !IsInteractionMesh(mesh))
             return;
 
         var currentMaterial = rendererData._material.Managed();
         EnsureInteractionRendering(currentMaterial);
         var material = mesh.name == _pointerQuad.name
             ? _pointerMaterial
-            : mesh.name == _buttonQuad.name
-                ? _buttonMaterial
-                : _interactionSurfaceMaterial;
+            : mesh.name == _interactionQuad.name
+                ? _interactionSurfaceMaterial
+                : _buttonMaterial;
         if (material != null && (currentMaterial == null || currentMaterial.name != material.name))
             entityManager.SetComponentData(entity, new CRPRendererData(mesh, 0, material));
+    }
+
+    private bool IsInteractionMesh(Mesh mesh)
+    {
+        if (mesh.name == _interactionQuad.name || mesh.name == _pointerQuad.name)
+            return true;
+
+        for (var index = 0; index < _buttons.Count; index++)
+        {
+            if (mesh.name == _buttons[index].Mesh.name)
+                return true;
+        }
+
+        return false;
     }
 
     private void AlignInteractionSurface(
@@ -498,8 +480,8 @@ public sealed class BlackjackTable : InjectableBlock
         if (!_cameraReadyLogged)
         {
             _cameraReadyLogged = true;
-            Plugin.Log.LogInfo(
-                $"Using CRP camera entity {_cameraEntity.Index} for {Data.PrefabName}'s interaction pointer " +
+            Plugin.LogInfo(
+                $"Using CRP camera entity {_cameraEntity.Index} for {_prefabName}'s interaction pointer " +
                 $"at {cameraRay.origin} with axis {cameraRay.direction}.");
         }
 
@@ -558,35 +540,24 @@ public sealed class BlackjackTable : InjectableBlock
     private void EnsureInteractionRendering(Material sourceMaterial)
     {
         EnsureInteractionMeshes();
-
         if ((_interactionSurfaceMaterial != null && _pointerMaterial != null && _buttonMaterial != null) ||
             sourceMaterial == null)
             return;
 
         var shader = Shader.Find("Universal Render Pipeline/Unlit") ?? Shader.Find("Unlit/Color");
         _interactionSurfaceMaterial = shader != null ? new Material(shader) : new Material(sourceMaterial);
-        _interactionSurfaceMaterial.name = Data.PrefabName + "_InteractionSurfaceMaterial";
+        _interactionSurfaceMaterial.name = _prefabName + "_InteractionSurfaceMaterial";
         ConfigureMaterial(_interactionSurfaceMaterial, new Color(1f, 1f, 1f, 0f), true);
 
         _pointerMaterial = shader != null ? new Material(shader) : new Material(sourceMaterial);
-        _pointerMaterial.name = Data.PrefabName + "_PointerMaterial";
+        _pointerMaterial.name = _prefabName + "_PointerMaterial";
         ConfigureMaterial(_pointerMaterial, Color.red, false);
         _pointerMaterial.renderQueue = 3100;
 
         _buttonMaterial = shader != null ? new Material(shader) : new Material(sourceMaterial);
-        _buttonMaterial.name = Data.PrefabName + "_ButtonMaterial";
+        _buttonMaterial.name = _prefabName + "_ButtonMaterial";
         ConfigureMaterial(_buttonMaterial, new Color(0.12f, 0.35f, 0.9f, 1f), false);
         _buttonMaterial.renderQueue = 3050;
-    }
-
-    private Bounds GetInteractionBounds()
-    {
-        var tabletopMesh = GetPlacedMesh(1) ?? GetPlacedMesh(0);
-        return tabletopMesh != null
-            ? tabletopMesh.bounds
-            : new Bounds(
-                new Vector3(0f, InteractionSurfaceHeight, InteractionSurfaceCenterZ),
-                new Vector3(InteractionSurfaceWidth, 0f, InteractionSurfaceDepth));
     }
 
     private void EnsureInteractionMeshes()
@@ -596,10 +567,11 @@ public sealed class BlackjackTable : InjectableBlock
         if (_pointerQuad == null)
         {
             _pointerQuad = CreateInteractionQuad();
-            _pointerQuad.name = Data.PrefabName + "_PointerQuad";
+            _pointerQuad.name = _prefabName + "_PointerQuad";
         }
-        if (_buttonQuad == null)
-            _buttonQuad = CreateButtonQuad();
+
+        for (var index = 0; index < _buttons.Count; index++)
+            _buttons[index].EnsureMesh(_prefabName);
     }
 
     private static EPC_Renderer CreateInteractionRenderer(
@@ -681,7 +653,7 @@ public sealed class BlackjackTable : InjectableBlock
         triangles[4] = 2;
         triangles[5] = 3;
 
-        var mesh = new Mesh { name = Data.PrefabName + "_InteractionQuad" };
+        var mesh = new Mesh();
         mesh.SetVertices(vertices);
         mesh.SetNormals(normals);
         mesh.SetTriangles(triangles, 0);
@@ -689,24 +661,11 @@ public sealed class BlackjackTable : InjectableBlock
         return mesh;
     }
 
-    private static Mesh CreateInteractionSurfaceMarker()
+    private Mesh CreateInteractionSurfaceMarker()
     {
         var mesh = CreateInteractionQuad();
+        mesh.name = _prefabName + "_InteractionQuad";
         mesh.SetVertices(new Il2CppStructArray<Vector3>(4));
-        mesh.RecalculateBounds();
-        return mesh;
-    }
-
-    private static Mesh CreateButtonQuad()
-    {
-        var mesh = CreateInteractionQuad();
-        var vertices = new Il2CppStructArray<Vector3>(4);
-        vertices[0] = new Vector3(-ButtonWidth * 0.5f, 0f, -ButtonDepth * 0.5f);
-        vertices[1] = new Vector3(-ButtonWidth * 0.5f, 0f, ButtonDepth * 0.5f);
-        vertices[2] = new Vector3(ButtonWidth * 0.5f, 0f, ButtonDepth * 0.5f);
-        vertices[3] = new Vector3(ButtonWidth * 0.5f, 0f, -ButtonDepth * 0.5f);
-        mesh.SetVertices(vertices);
-        mesh.name = Data.PrefabName + "_ButtonQuad";
         mesh.RecalculateBounds();
         return mesh;
     }
@@ -721,50 +680,23 @@ public sealed class BlackjackTable : InjectableBlock
             new Vector4(value.c3.x, value.c3.y, value.c3.z, value.c3.w));
     }
 
-    private static Texture2D CreateCheckerboardTexture()
-    {
-        var texture = new Texture2D(8, 8, TextureFormat.RGBA32, false)
-        {
-            name = Data.PrefabName + "_Icon",
-            filterMode = FilterMode.Point,
-            wrapMode = TextureWrapMode.Repeat
-        };
-        var pixels = new Color32[64];
-        var pink = new Color32(255, 0, 144, 255);
-        var black = new Color32(0, 0, 0, 255);
-
-        for (var y = 0; y < 8; y++)
-        for (var x = 0; x < 8; x++)
-            pixels[y * 8 + x] = (x + y) % 2 == 0 ? pink : black;
-
-        texture.SetPixels32(pixels);
-        texture.Apply(false, false);
-        return texture;
-    }
-
     private sealed class InteractionInstance
     {
         internal readonly World World;
         internal readonly Entity TableEntity;
-        internal readonly BlackjackGameState GameState;
+        internal readonly Dictionary<InteractionButton, Entity> ButtonEntities = new();
         internal Entity SurfaceEntity;
         internal Entity PointerEntity;
-        internal Entity ButtonEntity;
-        internal GameObject UiRoot;
-        internal Button TestButton;
 
         internal InteractionInstance(World world, Entity tableEntity)
         {
             World = world;
             TableEntity = tableEntity;
-            GameState = new BlackjackGameState();
         }
 
         internal void Dispose()
         {
-            if (UiRoot != null)
-                UnityEngine.Object.Destroy(UiRoot);
+            ButtonEntities.Clear();
         }
     }
-
 }

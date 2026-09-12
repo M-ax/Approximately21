@@ -1,5 +1,4 @@
 using System;
-using BepInEx.Logging;
 using HarmonyLib;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppSystem.Collections.Generic;
@@ -59,7 +58,6 @@ public class InjectableBlock : MonoBehaviour
 {
     private const int MaterialGroupCount = 4;
 
-    private readonly ManualLogSource _log;
     private readonly System.Collections.Generic.Dictionary<int, EPC_Renderer> _additionalRenderers = new();
     private readonly System.Collections.Generic.Dictionary<int, Entity> _additionalRendererEntities = new();
     private Core _registeredCore;
@@ -104,14 +102,12 @@ public class InjectableBlock : MonoBehaviour
     protected InjectableBlock()
         : base(IntPtr.Zero)
     {
-        _log = Plugin.Log;
         ActiveBlocks.Add(this);
     }
 
     protected InjectableBlock(IntPtr pointer)
         : base(pointer)
     {
-        _log = Plugin.Log;
         ActiveBlocks.Add(this);
     }
 
@@ -135,7 +131,7 @@ public class InjectableBlock : MonoBehaviour
             {
                 _placedModelApplied = TryApplyPlacedModel();
                 if (_placedModelApplied)
-                    _log.LogInfo($"Applied {PrefabName}'s placed model to its ECS prefab renderer.");
+                    Plugin.LogInfo($"Applied {PrefabName}'s placed model to its ECS prefab renderer.");
             }
 
             if (_registered)
@@ -152,12 +148,12 @@ public class InjectableBlock : MonoBehaviour
             {
                 _menuRefreshed = RefreshInventoryMenus();
                 if (_menuRefreshed)
-                    _log.LogInfo($"Added {PrefabName} as an independent build-menu item.");
+                    Plugin.LogInfo($"Added {PrefabName} as an independent build-menu item.");
             }
         }
         catch (Exception exception)
         {
-            _log.LogError($"Could not register {PrefabName}: {exception}");
+            Plugin.LogError($"Could not register {PrefabName}: {exception}");
         }
     }
 
@@ -175,7 +171,7 @@ public class InjectableBlock : MonoBehaviour
         _refreshErrorLogged = false;
         _placedModelApplied = false;
         _refreshDelay = 120;
-        _log.LogInfo($"Detected a new game core; registering {PrefabName} beside {SourceItemName} when it is available.");
+        Plugin.LogInfo($"Detected a new game core; registering {PrefabName} beside {SourceItemName} when it is available.");
     }
 
     private void TryInjectLocalization()
@@ -187,7 +183,7 @@ public class InjectableBlock : MonoBehaviour
         localization._map[PrefabName + "_Name"] = DisplayName;
         localization._map[PrefabName + "_Desc"] = Description;
         _localizedInstance = localization;
-        _log.LogInfo($"Added localization for {PrefabName}.");
+        Plugin.LogInfo($"Added localization for {PrefabName}.");
     }
 
     private bool Register(Core core)
@@ -198,7 +194,7 @@ public class InjectableBlock : MonoBehaviour
             if (!_sourceNotFoundLogged)
             {
                 _sourceNotFoundLogged = true;
-                _log.LogInfo($"{SourceItemName} is not ready for {PrefabName} yet; registration will retry.");
+                Plugin.LogInfo($"{SourceItemName} is not ready for {PrefabName} yet; registration will retry.");
             }
 
             return false;
@@ -226,7 +222,7 @@ public class InjectableBlock : MonoBehaviour
 
             core._componentsMap.Add(_injectedPrefab, _injectedBlock);
             EnsureCatalogContains(core, _injectedBlock);
-            _log.LogInfo($"Registered {PrefabName} beside {SourceItemName} with its own prefab identity.");
+            Plugin.LogInfo($"Registered {PrefabName} beside {SourceItemName} with its own prefab identity.");
         }
 
         if (!TryConfigureAttachedComponents(_injectedBlock, core))
@@ -296,7 +292,7 @@ public class InjectableBlock : MonoBehaviour
             _additionalRenderers.Add(materialGroup, groupRenderer);
         }
 
-        _log.LogInfo($"Configured {PrefabName}'s native table renderers.");
+        Plugin.LogInfo($"Configured {PrefabName}'s native table renderers.");
     }
 
     private static void ConfigureRenderer(
@@ -318,7 +314,7 @@ public class InjectableBlock : MonoBehaviour
         try
         {
             core.RefreshStandaloneAvailableComponents();
-            _log.LogInfo($"Added {PrefabName} to the available buildable inventory components; waiting for the build menu.");
+            Plugin.LogInfo($"Added {PrefabName} to the available buildable inventory components; waiting for the build menu.");
             return true;
         }
         catch (Exception exception)
@@ -326,7 +322,7 @@ public class InjectableBlock : MonoBehaviour
             if (!_refreshErrorLogged)
             {
                 _refreshErrorLogged = true;
-                _log.LogInfo($"Inventory is not ready for {PrefabName} yet; registration will retry. {exception.Message}");
+                Plugin.LogInfo($"Inventory is not ready for {PrefabName} yet; registration will retry. {exception.Message}");
             }
 
             return false;
@@ -447,7 +443,7 @@ public class InjectableBlock : MonoBehaviour
         SetMaterialColorIfSupported(material, "_TintColor", color, ref supportedColorProperties);
         if (material.HasProperty("_Frame3DTexture"))
             material.SetTexture("_Frame3DTexture", GetPlacedTexture(color));
-        _log.LogInfo($"{PrefabName} material uses '{sourceMaterial.name}' and shader '{material.shader.name}', supported color properties: {supportedColorProperties}, all properties: {GetShaderProperties(material.shader)}.");
+        Plugin.LogInfo($"{PrefabName} material uses '{sourceMaterial.name}' and shader '{material.shader.name}', supported color properties: {supportedColorProperties}, all properties: {GetShaderProperties(material.shader)}.");
         BlockMaterialCache.Store(PrefabName, material);
         return material;
     }
@@ -513,12 +509,12 @@ public class InjectableBlock : MonoBehaviour
             {
                 var rawMeshes = RawMeshModelLoader.TryLoadMeshes(meshStream, PrefabName + "_Mesh", RawMeshScale);
                 BlockModelCache.Store(PrefabName, rawMeshes);
-                _log.LogInfo($"Loaded {PrefabName}'s raw model from embedded resource {RawMeshFileName}.");
+                Plugin.LogInfo($"Loaded {PrefabName}'s raw model from embedded resource {RawMeshFileName}.");
                 return rawMeshes[0];
             }
             catch (Exception exception)
             {
-                _log.LogWarning($"Could not load {PrefabName}'s embedded raw model; using the placeholder model. {exception}");
+                Plugin.LogWarning($"Could not load {PrefabName}'s embedded raw model; using the placeholder model. {exception}");
             }
         }
 
@@ -526,7 +522,7 @@ public class InjectableBlock : MonoBehaviour
         if (placeholderMesh != null)
         {
             BlockModelCache.Store(PrefabName, placeholderMesh);
-            _log.LogInfo($"Using the procedural placeholder model for {PrefabName}.");
+            Plugin.LogInfo($"Using the procedural placeholder model for {PrefabName}.");
         }
 
         return placeholderMesh;
@@ -549,7 +545,7 @@ public class InjectableBlock : MonoBehaviour
         if (!_menuItemNotFoundLogged)
         {
             _menuItemNotFoundLogged = true;
-            _log.LogInfo($"The {PrefabName} menu row is not ready yet; refresh will retry.");
+            Plugin.LogInfo($"The {PrefabName} menu row is not ready yet; refresh will retry.");
         }
 
         return false;
