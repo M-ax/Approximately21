@@ -1,5 +1,6 @@
 using System;
 using HarmonyLib;
+using Il2CppInterop.Runtime.Attributes;
 using Il2CppInterop.Runtime.InteropTypes.Arrays;
 using Il2CppSystem.Collections.Generic;
 using Unity.Entities;
@@ -12,9 +13,9 @@ public sealed class InjectableBlockData
 {
     public InjectableBlockData(string prefabName,
         string sourceItemName,
+        string displayName,
+        string description,
         Func<Texture2D> createIcon,
-        string assetBundleFileName,
-        string assetMeshName,
         string rawMeshFileName,
         float rawMeshScale,
         float modelColorRed,
@@ -23,9 +24,9 @@ public sealed class InjectableBlockData
     {
         PrefabName = prefabName;
         SourceItemName = sourceItemName;
+        DisplayName = displayName;
+        Description = description;
         CreateIcon = createIcon;
-        AssetBundleFileName = assetBundleFileName;
-        AssetMeshName = assetMeshName;
         RawMeshFileName = rawMeshFileName;
         RawMeshScale = rawMeshScale;
         ModelColorRed = modelColorRed;
@@ -37,11 +38,11 @@ public sealed class InjectableBlockData
 
     public string SourceItemName { get; }
 
+    public string DisplayName { get; }
+
+    public string Description { get; }
+
     public Func<Texture2D> CreateIcon { get; }
-
-    public string AssetBundleFileName { get; }
-
-    public string AssetMeshName { get; }
 
     public string RawMeshFileName { get; }
 
@@ -54,10 +55,11 @@ public sealed class InjectableBlockData
     public float ModelColorBlue { get; }
 }
 
-public class InjectableBlock : MonoBehaviour
+public abstract class InjectableBlock : MonoBehaviour
 {
     private const int MaterialGroupCount = 4;
 
+    private readonly InjectableBlockData _data;
     private readonly System.Collections.Generic.Dictionary<int, EPC_Renderer> _additionalRenderers = new();
     private readonly System.Collections.Generic.Dictionary<int, Entity> _additionalRendererEntities = new();
     private Core _registeredCore;
@@ -77,37 +79,29 @@ public class InjectableBlock : MonoBehaviour
     private static readonly System.Collections.Generic.List<InjectableBlock> ActiveBlocks = new();
     private static bool _inventoryPatchApplied;
 
-    private string PrefabName => InjectableBlockConfiguration.GetPrefabName(GetType());
+    private string PrefabName => _data.PrefabName;
 
-    private string SourceItemName => InjectableBlockConfiguration.GetSourceItemName(GetType());
+    private string SourceItemName => _data.SourceItemName;
 
-    private string DisplayName => InjectableBlockConfiguration.GetDisplayName(GetType());
+    private string DisplayName => _data.DisplayName;
 
-    private string Description => InjectableBlockConfiguration.GetDescription(GetType());
+    private string Description => _data.Description;
 
-    private string AssetBundleFileName => InjectableBlockConfiguration.GetAssetBundleFileName(GetType());
+    private string RawMeshFileName => _data.RawMeshFileName;
 
-    private string AssetMeshName => InjectableBlockConfiguration.GetAssetMeshName(GetType());
+    private float RawMeshScale => _data.RawMeshScale;
 
-    private string RawMeshFileName => InjectableBlockConfiguration.GetRawMeshFileName(GetType());
+    private float ModelColorRed => _data.ModelColorRed;
 
-    private float RawMeshScale => InjectableBlockConfiguration.GetRawMeshScale(GetType());
+    private float ModelColorGreen => _data.ModelColorGreen;
 
-    private float ModelColorRed => InjectableBlockConfiguration.GetModelColorRed(GetType());
+    private float ModelColorBlue => _data.ModelColorBlue;
 
-    private float ModelColorGreen => InjectableBlockConfiguration.GetModelColorGreen(GetType());
-
-    private float ModelColorBlue => InjectableBlockConfiguration.GetModelColorBlue(GetType());
-
-    protected InjectableBlock()
-        : base(IntPtr.Zero)
-    {
-        ActiveBlocks.Add(this);
-    }
-
-    protected InjectableBlock(IntPtr pointer)
+    [HideFromIl2Cpp]
+    protected InjectableBlock(IntPtr pointer, InjectableBlockData data)
         : base(pointer)
     {
+        _data = data ?? throw new ArgumentNullException(nameof(data));
         ActiveBlocks.Add(this);
     }
 
@@ -119,9 +113,12 @@ public class InjectableBlock : MonoBehaviour
 
             var core = Core.Get();
             if (core == null || core._componentsMap == null || core._spaceshipComponents == null)
+            {
+                if (_registeredCore != null) ResetForCore(null);
                 return;
+            }
 
-            if (!ReferenceEquals(_registeredCore, core))
+            if (_registeredCore == null || _registeredCore.Pointer != core.Pointer)
                 ResetForCore(core);
 
             if (!_registered)
@@ -159,6 +156,7 @@ public class InjectableBlock : MonoBehaviour
 
     private void ResetForCore(Core core)
     {
+        ResetAttachedComponents();
         _registeredCore = core;
         _injectedBlock = null;
         _additionalRenderers.Clear();
@@ -215,7 +213,7 @@ public class InjectableBlock : MonoBehaviour
             _injectedBlock = UnityEngine.Object.Instantiate(source);
             _injectedBlock.name = PrefabName;
             _injectedBlock.gameObject.name = PrefabName;
-            _injectedBlock._iconTexture2D = _iconTexture ??= InjectableBlockConfiguration.CreateIcon(GetType());
+            _injectedBlock._iconTexture2D = _iconTexture ??= _data.CreateIcon();
             UnityEngine.Object.DontDestroyOnLoad(_injectedBlock.gameObject);
             _injectedBlock.gameObject.SetActive(false);
             ConfigureRendererChildren(_injectedBlock);
@@ -266,6 +264,14 @@ public class InjectableBlock : MonoBehaviour
 
     protected virtual void UpdateAttachedComponents()
     {
+    }
+
+    protected virtual void ResetAttachedComponents() { }
+
+    protected virtual void OnDestroy()
+    {
+        ResetAttachedComponents();
+        ActiveBlocks.Remove(this);
     }
 
     private void ConfigureRendererChildren(EPC_SpaceshipComponent block)

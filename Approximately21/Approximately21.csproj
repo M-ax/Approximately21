@@ -22,6 +22,10 @@
     </ItemGroup>
 
     <ItemGroup>
+        <Reference Include="com.rlabrecque.steamworks.net">
+            <HintPath>$(ApproximatelyUpDirectory)\BepInEx\interop\com.rlabrecque.steamworks.net.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
         <Reference Include="Assembly-CSharp">
             <HintPath>$(ApproximatelyUpDirectory)\BepInEx\interop\Assembly-CSharp.dll</HintPath>
             <Private>false</Private>

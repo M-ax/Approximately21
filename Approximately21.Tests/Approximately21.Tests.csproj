@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+    <PropertyGroup>
+        <TargetFramework>net6.0</TargetFramework>
+        <IsPackable>false</IsPackable>
+        <IsTestProject>true</IsTestProject>
+        <LangVersion>latest</LangVersion>
+    </PropertyGroup>
+    <ItemGroup>
+        <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+        <PackageReference Include="xunit" Version="2.9.2" />
+        <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" PrivateAssets="all" />
+    </ItemGroup>
+    <ItemGroup>
+        <None Include="..\lib\BlackjackTableBundle\Built\BlackjackTableMesh.bin"
+              Link="BlackjackTableMesh.bin" CopyToOutputDirectory="PreserveNewest" />
+        <Compile Include="..\Approximately21\InteractionGeometry.cs" Link="InteractionGeometry.cs" />
+        <Compile Include="..\Approximately21\InteractionVisualState.cs" Link="InteractionVisualState.cs" />
+        <Compile Include="..\Approximately21\Blackjack\*.cs"
+                 Exclude="..\Approximately21\Blackjack\BlackjackInteraction.cs;..\Approximately21\Blackjack\BlackjackTable.cs;..\Approximately21\Blackjack\BlackjackSeatInteraction.cs"
+                 Link="Blackjack\%(Filename)%(Extension)" />
+        <Compile Include="..\Approximately21\Networking\*.cs"
+                 Exclude="..\Approximately21\Networking\SteamGameTransport.cs"
+                 Link="Networking\%(Filename)%(Extension)" />
+    </ItemGroup>
+</Project>

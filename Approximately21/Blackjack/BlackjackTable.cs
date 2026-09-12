@@ -12,10 +12,8 @@ public sealed class BlackjackTable : InjectableBlock
 
     private static readonly InjectableBlockData Data = new(
         "Approximately21_BlackjackTable",
-        "Frame Quarter",
+        "Frame Quarter", "Blackjack Table", "A blackjack table.",
         CreateCheckerboardTexture,
-        "Approximately21_BlackjackTable.bundle",
-        "BlackjackTableMesh",
         "Approximately21.BlackjackTableMesh.bin",
         0.1f,
         0.06806712f,
@@ -24,29 +22,30 @@ public sealed class BlackjackTable : InjectableBlock
     private readonly BlackjackInteraction _interaction = new(Data.PrefabName);
 
     public BlackjackTable(IntPtr pointer)
-        : base(pointer)
+        : base(pointer, Data)
     {
-    }
-
-    internal static void RegisterDefinition()
-    {
-        InjectableBlockConfiguration.Register(
-            typeof(BlackjackTable),
-            Data,
-            "Blackjack Table",
-            "A blackjack table.");
     }
 
     protected override bool TryConfigureAttachedComponents(EPC_SpaceshipComponent block, Core core)
     {
+        _interaction.RegisterSeats(GetInteractionBounds());
         return _interaction.TryConfigureAttachedComponents(block, core, GetInteractionBounds());
     }
 
     protected override void UpdateAttachedComponents()
     {
+        _interaction.RefreshRuntime();
         var tableMesh = GetPlacedMesh(0);
         if (tableMesh != null)
             _interaction.Update(tableMesh, GetInteractionBounds());
+    }
+
+    protected override void ResetAttachedComponents() => _interaction.ResetRendering();
+
+    protected override void OnDestroy()
+    {
+        _interaction.Dispose();
+        base.OnDestroy();
     }
 
     private Bounds GetInteractionBounds()

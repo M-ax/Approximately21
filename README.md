@@ -7,6 +7,8 @@ A BepInEx mod for *Approximately Up* that adds a blackjack table to the game.
 
 Put your ship's available energy and fuel supply on the line, play a hand, and hope your next jump is still affordable.
 
+The managed blackjack engine and host-authoritative networking backend are implemented separately from the pending in-game UI and lifecycle wiring. See [the backend and integration guide](Approximately21/Networking/README.md) for rules, APIs, and tests. Current wagers are play chips only.
+
 ## Disclaimer
 
 This project is 100% vibe-coded slop.

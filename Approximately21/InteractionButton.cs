@@ -19,7 +19,15 @@ public sealed class InteractionButton
 
     public string Name { get; }
 
-    public event Action<int> Clicked;
+    public event Action<InteractionContext> Clicked;
+
+    public float RotationRadians { get; init; }
+    public string Label { get; init; }
+    public Func<InteractionContext, InteractionVisualState> GetVisualState { get; set; }
+
+    internal Vector2 Size => _size;
+    internal InteractionVisualState Evaluate(InteractionContext context) =>
+        GetVisualState?.Invoke(context) ?? new InteractionVisualState(Label ?? Name, true);
 
     internal Mesh Mesh { get; private set; }
 
@@ -35,6 +43,8 @@ public sealed class InteractionButton
         vertices[1] = new Vector3(-_size.x * 0.5f, 0f, _size.y * 0.5f);
         vertices[2] = new Vector3(_size.x * 0.5f, 0f, _size.y * 0.5f);
         vertices[3] = new Vector3(_size.x * 0.5f, 0f, -_size.y * 0.5f);
+        for (var index = 0; index < vertices.Length; index++)
+            vertices[index] = Rotate(vertices[index]);
         var normals = new Il2CppStructArray<Vector3>(4);
         for (var index = 0; index < normals.Length; index++)
             normals[index] = Vector3.up;
@@ -57,11 +67,24 @@ public sealed class InteractionButton
     internal bool Contains(Vector3 localHit, Bounds interactionBounds)
     {
         var center = interactionBounds.center + _localOffset;
-        return Mathf.Abs(localHit.x - center.x) <= _size.x * 0.5f &&
-               Mathf.Abs(localHit.z - center.z) <= _size.y * 0.5f;
+        return InteractionGeometry.Contains(localHit.x - center.x, localHit.z - center.z,
+            _size.x, _size.y, RotationRadians);
     }
 
-    internal void InvokeClick(int tableEntityIndex)
+    internal Vector3 Rotate(Vector3 point)
+    {
+        var c = Mathf.Cos(RotationRadians);
+        var s = Mathf.Sin(RotationRadians);
+        return new Vector3(c * point.x - s * point.z, point.y, s * point.x + c * point.z);
+    }
+
+    internal void ReleaseMesh()
+    {
+        if (Mesh != null) UnityEngine.Object.Destroy(Mesh);
+        Mesh = null;
+    }
+
+    internal void InvokeClick(InteractionContext tableEntityIndex)
     {
         Clicked?.Invoke(tableEntityIndex);
     }

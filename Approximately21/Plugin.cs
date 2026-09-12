@@ -2,6 +2,7 @@
 using BepInEx;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
+using Approximately21.Networking.Unity;
 
 namespace Approximately21;
 
@@ -20,7 +21,11 @@ public class Plugin : BasePlugin
     {
         Log = base.Log;
         LogInfo($"Plugin {MyPluginInfo.PLUGIN_GUID} is loaded!");
-        BlackjackTable.RegisterDefinition();
+        BlackjackNetworkingRuntime.Channel = Config.Bind("Networking", "BlackjackChannel", 21021,
+            "Nonnegative Steam messages channel; coordinate the same unused value on every peer. Restart to change.").Value;
+        if (BlackjackNetworkingRuntime.Channel < 0)
+            throw new System.InvalidOperationException("BlackjackChannel must be nonnegative.");
+        AddComponent<BlackjackNetworkingRuntime>();
         AddComponent<BlackjackTable>();
     }
 }
